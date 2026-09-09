@@ -38,14 +38,16 @@ const BaseDirKey contextKey = "baseDir"
 // files are served under skill://<skill-name>/*.
 const SkillScheme = "skill"
 
-// SchemeAllowed reports whether uri carries either nativeScheme (eg. type: file) or
-// SkillScheme (entry containing skill://).
-func SchemeAllowed(uri, nativeScheme string) bool {
+// ValidateScheme checks uri against the schemes a resource may be addressed by:
+// nativeScheme, which is the resource's own type (eg. file), or SkillScheme. The
+// returned error names the accepted set, so callers need only prefix it with the
+// resource they were validating.
+func ValidateScheme(uri, nativeScheme string) error {
 	parsed, err := url.Parse(uri)
-	if err != nil {
-		return false
+	if err != nil || (parsed.Scheme != nativeScheme && parsed.Scheme != SkillScheme) {
+		return fmt.Errorf("must be '%s' or '%s'", nativeScheme, SkillScheme)
 	}
-	return parsed.Scheme == nativeScheme || parsed.Scheme == SkillScheme
+	return nil
 }
 
 // GetBaseDirFromContext extracts the base directory path from the context.
