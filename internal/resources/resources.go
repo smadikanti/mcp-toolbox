@@ -34,8 +34,8 @@ type contextKey string
 // BaseDirKey is the context key for storing the base directory path during config parsing.
 const BaseDirKey contextKey = "baseDir"
 
-// SkillScheme addresses a resource that belongs to an Agent Skill. A skill's
-// files are served under skill://<skill-name>/*.
+// SkillScheme is how a resource belonging to an Agent Skill is addressed,
+// as skill://<skill-name>/<path>, whichever resource type backs it.
 const SkillScheme = "skill"
 
 // ValidateScheme checks uri against the schemes a resource may be addressed by:
