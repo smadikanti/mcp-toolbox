@@ -13,9 +13,7 @@
 // limitations under the License.
 
 // Package skills implements the io.modelcontextprotocol/skills extension
-// (SEP-2640). A skill is a directory of files served over the Resources
-// primitive: SKILL.md at its root, addressed as skill://<skill-path>/SKILL.md,
-// plus any supporting files sharing that prefix.
+// (SEP-2640).
 package skills
 
 import (
@@ -25,8 +23,6 @@ import (
 	"strings"
 )
 
-// DynamicMarker is what a skill publishes in place of a file list when its
-// content is generated and cannot carry stable digests.
 const DynamicMarker = "dynamic"
 
 // Per-skill limits fixed by SEP-2640, both inclusive.
@@ -35,24 +31,16 @@ const (
 	MaxTotalSize = 16 << 20 // 16 MiB, summed over every ref's Size
 )
 
-// ResourceRef is one file in a skill's manifest. Every field is required:
-// size lets a host budget a skill before fetching anything, and a read whose
-// length disagrees with it fails verification before any hashing.
+// ResourceRef is one file in a skill's manifest.
 type ResourceRef struct {
 	URI    string `json:"uri"`
 	Digest string `json:"digest"` // "sha256:" followed by 64 lowercase hex characters
-	Size   int64  `json:"size"`   // raw byte length of the content the digest covers
+	Size   int64  `json:"size"`
 }
 
-// Manifest is a skill's complete file list, or the marker saying it has none.
-// SEP-2640 admits exactly those two forms and no third; the struct can hold
-// neither and both, so Validate is what enforces the union.
+// Manifest is a skill's complete file list, or the marker: "dynamic".
 type Manifest struct {
-	// Refs lists every file of the skill, SKILL.md included. Ignored when
-	// Dynamic is set.
 	Refs []ResourceRef
-	// Dynamic marks a skill whose content is generated, so no digest can be
-	// published for it.
 	Dynamic bool
 }
 
@@ -61,19 +49,13 @@ func (m Manifest) MarshalJSON() ([]byte, error) {
 	if m.Dynamic {
 		return json.Marshal(DynamicMarker)
 	}
-	// Empty Refs means unpopulated, not a skill with no files. Emitting []
-	// keeps the wire type stable; UnmarshalJSON will not read it back.
+	// Empty Refs means unpopulated, not a skill with no files.
 	if len(m.Refs) == 0 {
 		return json.Marshal([]ResourceRef{})
 	}
 	return json.Marshal(m.Refs)
 }
 
-// UnmarshalJSON accepts either form and rejects anything else.
-//
-// Dispatching on the first byte parses once, where switching on a decoded any
-// would build a throwaway tree and reparse. It also keeps null out: encoding/json
-// reads null into both a string and a slice, leaving each at its zero value.
 func (m *Manifest) UnmarshalJSON(data []byte) error {
 	data = bytes.TrimSpace(data)
 	if len(data) == 0 {
@@ -109,8 +91,6 @@ func (m *Manifest) UnmarshalJSON(data []byte) error {
 	}
 }
 
-// Validate reports whether the manifest is one of SEP-2640's two forms, and
-// whether a file list is one a conforming host will accept.
 func (m Manifest) Validate() error {
 	if m.Dynamic {
 		if len(m.Refs) > 0 {
@@ -167,7 +147,7 @@ func truncate(s string) string {
 }
 
 // validDigest matches SEP-2640's sha256:{hex} form, {hex} being 64 lowercase
-// hex characters. Uppercase is rejected, not folded: hosts compare as strings.
+// hex characters.
 func validDigest(s string) bool {
 	hex, ok := strings.CutPrefix(s, "sha256:")
 	if !ok || len(hex) != 64 {
@@ -186,17 +166,14 @@ type Entry struct {
 	// URI addresses the skill's SKILL.md, not its root directory.
 	URI string `json:"uri"`
 	// Frontmatter is the SKILL.md YAML frontmatter verbatim. A host compares it
-	// field by field against the file it fetches, so it must not be normalised.
+	// field by field against the file it fetches.
 	Frontmatter map[string]any `json:"frontmatter"`
 	Resources   Manifest       `json:"resources"`
 }
 
-// UnmarshalJSON rejects an entry carrying no resources, which SEP-2640 calls
-// invalid. Manifest cannot catch it: encoding/json never calls a custom
-// unmarshaller for an absent key, leaving the field at the zero Manifest.
+// UnmarshalJSON rejects an entry carrying no resources
 func (e *Entry) UnmarshalJSON(data []byte) error {
-	// entry sheds this method so the decode does not recurse. RawMessage rather
-	// than *Manifest, which would nil for both an absent key and a null.
+	// entry sheds this method so the decode does not recurse.
 	type entry Entry
 	aux := struct {
 		*entry
@@ -213,15 +190,12 @@ func (e *Entry) UnmarshalJSON(data []byte) error {
 }
 
 // Validate checks the rules relating a manifest to the skill's own identity.
-// The URI rules are not tied to skill://, which SEP-2640 applies "regardless
-// of scheme".
 func (e Entry) Validate() error {
 	root, ok := strings.CutSuffix(e.URI, "/SKILL.md")
 	if !ok || root == "" {
 		return fmt.Errorf("invalid skill entry %q: uri must address the skill's SKILL.md", truncate(e.URI))
 	}
-	// The last segment before SKILL.md is the skill name, which is what makes
-	// the name recoverable from the URI without reading frontmatter.
+	// The last segment before SKILL.md is the skill name
 	name := root[strings.LastIndex(root, "/")+1:]
 	if name == "" {
 		return fmt.Errorf("invalid skill entry %q: uri has no skill-path segment before SKILL.md", truncate(e.URI))
@@ -281,8 +255,6 @@ func requiredString(fm map[string]any, key string) (string, error) {
 	return s, nil
 }
 
-// MarshalJSON keeps frontmatter an object when unpopulated: SEP-2640 requires
-// the field and null is not an object. Validate is what rejects such an entry.
 func (e Entry) MarshalJSON() ([]byte, error) {
 	type entry Entry
 	aux := entry(e)
