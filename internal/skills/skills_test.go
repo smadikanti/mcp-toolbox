@@ -150,9 +150,6 @@ func TestManifestUnmarshalJSON(t *testing.T) {
 	}
 }
 
-// TestEntryMarshalJSON pins the shape SEP-2640 specifies for a skills/list
-// entry: the URI addresses SKILL.md rather than the skill root, and frontmatter
-// passes through verbatim because a host compares it field by field.
 // TestManifestUnmarshalBoundsTheOffendingString keeps an error message from
 // carrying a whole wire value into the logs.
 func TestManifestUnmarshalBoundsTheOffendingString(t *testing.T) {
@@ -326,6 +323,9 @@ func TestManifestValidate(t *testing.T) {
 	}
 }
 
+// TestEntryMarshalJSON pins the shape SEP-2640 specifies for a skills/list
+// entry: the URI addresses SKILL.md rather than the skill root, and frontmatter
+// passes through verbatim because a host compares it field by field.
 func TestEntryMarshalJSON(t *testing.T) {
 	e := skills.Entry{
 		URI: "skill://analytics-guide/SKILL.md",

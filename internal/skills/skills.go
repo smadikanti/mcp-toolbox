@@ -40,7 +40,7 @@ type ResourceRef struct {
 
 // Manifest is a skill's complete file list, or the marker: "dynamic".
 type Manifest struct {
-	Refs []ResourceRef
+	Refs    []ResourceRef
 	Dynamic bool
 }
 
