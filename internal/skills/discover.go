@@ -27,19 +27,9 @@ import (
 	"github.com/googleapis/mcp-toolbox/internal/util"
 )
 
-// skillFile is the file whose presence makes a directory a skill.
 const skillFile = "SKILL.md"
 
-// Discover builds one Entry per skill found in resourcesMap.
-//
-// A skill is any resource addressed at skill://<skill-path>/SKILL.md, however it
-// was declared; every resource sharing that prefix is one of its supporting
-// files. Recognising on SKILL.md rather than on a directory resource is what
-// lets a skill be assembled from hand-written file and text resources, and it
-// matches SEP-2640, which keys an entry on its SKILL.md URI and never on a root.
-//
-// Nested skills are returned as entries in their own right and remain listed in
-// the enclosing skill's manifest, as the SEP requires.
+// Discover builds one Entry per skill. A skill can have 1 or more supporting files.
 func Discover(ctx context.Context, resourcesMap map[string]resources.Resource) ([]Entry, error) {
 	roots := skillRoots(resourcesMap)
 	if len(roots) == 0 {
@@ -64,16 +54,15 @@ func Discover(ctx context.Context, resourcesMap map[string]resources.Resource) (
 	return entries, nil
 }
 
-// skillRoots returns the skill:// prefix of every SKILL.md in the map, sorted so
-// that discovery does not inherit Go's randomised map iteration order.
+// A list of root dir of every skill in the map, sorted
 func skillRoots(resourcesMap map[string]resources.Resource) []string {
 	var roots []string
 	for _, res := range resourcesMap {
 		uri := res.GetURI()
-		if !strings.HasPrefix(uri, resources.SkillScheme+"://") {
+		if !strings.HasPrefix(uri, resources.SkillScheme + "://") {
 			continue
 		}
-		if root, ok := strings.CutSuffix(uri, "/"+skillFile); ok {
+		if root, ok := strings.CutSuffix(uri, "/" + skillFile); ok {
 			roots = append(roots, root)
 		}
 	}
@@ -87,7 +76,7 @@ func buildEntry(ctx context.Context, root string, resourcesMap map[string]resour
 
 	members := make([]resources.Resource, 0, 8)
 	for _, res := range resourcesMap {
-		if strings.HasPrefix(res.GetURI(), root+"/") {
+		if strings.HasPrefix(res.GetURI(), root + "/") {
 			members = append(members, res)
 		}
 	}
@@ -117,8 +106,6 @@ func buildEntry(ctx context.Context, root string, resourcesMap map[string]resour
 	return Entry{URI: skillURI, Frontmatter: frontmatter, Resources: Manifest{Refs: refs}}, nil
 }
 
-// readString reads a resource's content. Read returns any because a future
-// resource type may not be textual; a skill's files must be.
 func readString(ctx context.Context, res resources.Resource) (string, error) {
 	got, err := res.Read(ctx, nil)
 	if err != nil {
@@ -131,11 +118,9 @@ func readString(ctx context.Context, res resources.Resource) (string, error) {
 	return content, nil
 }
 
-// parseFrontmatter extracts the leading YAML frontmatter of a SKILL.md. The
-// Agent Skills specification requires it, so its absence is an error rather
-// than an empty map.
+// Extracts the leading YAML frontmatter of a SKILL.md.
 func parseFrontmatter(content string) (map[string]any, error) {
-	// Only the delimiters are normalised; the digest is taken over raw bytes.
+	// Normalise delimeter for windows
 	content = strings.ReplaceAll(content, "\r\n", "\n")
 	rest, ok := strings.CutPrefix(content, "---\n")
 	if !ok {
@@ -153,9 +138,8 @@ func parseFrontmatter(content string) (map[string]any, error) {
 	return fm, nil
 }
 
-// cutAtDelimiter returns everything before the first line consisting only of
-// ---, reporting whether such a line exists. Trailing whitespace is tolerated
-// because an editor leaves it behind where the author cannot see it.
+// Returns everything before the first line consisting only of
+// ---, reporting whether such a line exists.
 func cutAtDelimiter(rest string) (string, bool) {
 	for offset := 0; ; {
 		line, tail, more := strings.Cut(rest[offset:], "\n")
@@ -169,9 +153,7 @@ func cutAtDelimiter(rest string) (string, bool) {
 	}
 }
 
-// warnOnDuplicateNames reports skills sharing a frontmatter name. SEP-2640
-// permits it and requires hosts to disambiguate, so this is a warning: it is
-// legal, but rarely what an operator intended.
+// warnOnDuplicateNames reports skills sharing a frontmatter name.
 func warnOnDuplicateNames(ctx context.Context, entries []Entry) error {
 	logger, err := util.LoggerFromContext(ctx)
 	if err != nil {
