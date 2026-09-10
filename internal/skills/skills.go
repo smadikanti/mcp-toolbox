@@ -220,8 +220,7 @@ func (e Entry) validateFrontmatter(name string) error {
 }
 
 // validateRefs checks that a file list names only files inside the skill, and
-// that it names the skill's own SKILL.md. A host resolves reads only to listed
-// URIs, so a skill omitting itself cannot be loaded at all.
+// that it names the skill's own SKILL.md.
 func (e Entry) validateRefs(scheme string, root []string) error {
 	var listsItself bool
 	for _, r := range e.Resources.Refs {
@@ -264,7 +263,7 @@ func uriSegments(raw string) (string, []string, error) {
 }
 
 // underSkill reports whether ref names a file inside the skill rooted at the
-// given scheme and segments. Equal length means the root itself, a directory.
+// given scheme and segments.
 func underSkill(ref, scheme string, root []string) bool {
 	s, segs, err := uriSegments(ref)
 	return err == nil && s == scheme && len(segs) > len(root) && slices.Equal(segs[:len(root)], root)
