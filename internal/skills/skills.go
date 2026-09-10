@@ -152,10 +152,7 @@ type Entry struct {
 	Resources   Manifest       `json:"resources"`
 }
 
-// UnmarshalJSON rejects an entry carrying no resources. Decoding into a local
-// struct keeps every field of Entry listed here: resources is held raw to tell
-// an absent key from a null one, and the fresh map replaces the frontmatter
-// rather than merging into it, as encoding/json would with a non-nil map.
+// UnmarshalJSON unmarshals a single skill entry. Rejects an entry carrying no resources.
 func (e *Entry) UnmarshalJSON(data []byte) error {
 	var fields struct {
 		URI         string          `json:"uri"`
@@ -185,8 +182,6 @@ func (e Entry) Validate() error {
 		return fmt.Errorf("invalid skill entry %q: uri must address the skill's SKILL.md", truncate(e.URI))
 	}
 	root := segs[:len(segs)-1]
-
-	// Identity is checked before the manifest: it binds a dynamic skill too.
 	if err := e.validateFrontmatter(root[len(root)-1]); err != nil {
 		return err
 	}
@@ -200,15 +195,14 @@ func (e Entry) Validate() error {
 }
 
 // validateFrontmatter checks the fields the Agent Skills specification requires,
-// and their agreement with name, the skill name taken from the uri.
+// and their agreement with name.
 func (e Entry) validateFrontmatter(name string) error {
+	// Check the frontmatter
 	fmName, err := requiredString(e.Frontmatter, "name")
 	if err != nil {
 		return fmt.Errorf("invalid skill entry %q: %w", truncate(e.URI), err)
 	}
-	// Checked on the frontmatter, not the uri segment: the two must be equal, so
-	// this covers both, and an invalid name is reported against the field that
-	// declares it.
+	// Check the uri segment
 	if err := validSkillName(fmName); err != nil {
 		return fmt.Errorf("invalid skill entry %q: frontmatter name %w", truncate(e.URI), err)
 	}
@@ -245,11 +239,7 @@ func (e Entry) validateRefs(scheme string, root []string) error {
 	return nil
 }
 
-// uriSegments splits a URI into its scheme and path segments, the authority
-// counting as the first segment per SEP-2640. Empty and dot segments are
-// rejected, which is what stops a ref climbing out of its skill; url.Parse
-// decodes percent-escapes first, so %2e%2e cannot smuggle one past. Errors read
-// as a suffix to "uri".
+// uriSegments splits a URI into a flat list of path segments.
 func uriSegments(raw string) (string, []string, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -280,11 +270,7 @@ func underSkill(ref, scheme string, root []string) bool {
 	return err == nil && s == scheme && len(segs) > len(root) && slices.Equal(segs[:len(root)], root)
 }
 
-// validSkillName applies the Agent Skills naming rules, which SEP-2640 requires
-// of the final skill-path segment. Errors read as a suffix to "frontmatter name".
-//
-// Charset is checked first, so by the length check the name is known to be
-// ASCII and its byte count is its character count.
+// validSkillName applies the Agent Skills naming rules
 func validSkillName(s string) error {
 	for _, c := range s {
 		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
@@ -318,8 +304,7 @@ func validDigest(s string) bool {
 	return true
 }
 
-// requiredString reads a frontmatter field the Agent Skills specification
-// requires. A nil map reports the field as absent.
+// requiredString reads a frontmatter field required by the Agent Skills specification.
 func requiredString(fm map[string]any, key string) (string, error) {
 	v, ok := fm[key]
 	if !ok {
