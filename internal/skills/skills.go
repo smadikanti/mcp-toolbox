@@ -275,8 +275,6 @@ func validSkillName(s string) error {
 			return fmt.Errorf("%q may only contain lowercase letters, digits, and hyphens", truncate(s))
 		}
 	}
-	// The lower bound matters as much as the upper: without it an empty name is
-	// only rejected because requiredString happens to run first.
 	if s == "" || len(s) > maxNameLen {
 		return fmt.Errorf("is %d characters, want 1 to %d", len(s), maxNameLen)
 	}
