@@ -141,9 +141,9 @@ func parseFrontmatter(content string) (map[string]any, error) {
 	if !ok {
 		return nil, fmt.Errorf("%s must open with YAML frontmatter delimited by ---", skillFile)
 	}
-	body, _, ok := strings.Cut(rest, "\n---")
+	body, ok := cutAtDelimiter(rest)
 	if !ok {
-		return nil, fmt.Errorf("%s frontmatter is not closed by ---", skillFile)
+		return nil, fmt.Errorf("%s frontmatter is not closed by --- on a line of its own", skillFile)
 	}
 
 	fm := map[string]any{}
@@ -151,6 +151,22 @@ func parseFrontmatter(content string) (map[string]any, error) {
 		return nil, fmt.Errorf("unable to parse %s frontmatter: %w", skillFile, err)
 	}
 	return fm, nil
+}
+
+// cutAtDelimiter returns everything before the first line consisting only of
+// ---, reporting whether such a line exists. Trailing whitespace is tolerated
+// because an editor leaves it behind where the author cannot see it.
+func cutAtDelimiter(rest string) (string, bool) {
+	for offset := 0; ; {
+		line, tail, more := strings.Cut(rest[offset:], "\n")
+		if strings.TrimRight(line, " \t") == "---" {
+			return rest[:offset], true
+		}
+		if !more {
+			return "", false
+		}
+		offset = len(rest) - len(tail)
+	}
 }
 
 // warnOnDuplicateNames reports skills sharing a frontmatter name. SEP-2640

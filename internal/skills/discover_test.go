@@ -298,3 +298,39 @@ func mustLoggerCtx(t *testing.T) context.Context {
 	}
 	return ctx
 }
+
+// TestDiscoverFrontmatterDelimiters pins the closing delimiter to a line of its
+// own. A line merely starting with --- must not end the frontmatter, or a file
+// that never closes it is accepted with a silently truncated header.
+func TestDiscoverFrontmatterDelimiters(t *testing.T) {
+	const header = "---\nname: guide\ndescription: A guide\n"
+	tcs := []struct {
+		desc    string
+		content string
+		wantErr string
+	}{
+		{"closed and followed by a body", header + "---\n\n# guide\n", ""},
+		{"closed at end of file", header + "---", ""},
+		{"horizontal rule in the body", header + "---\n\n# guide\n\n---\n\ntext\n", ""},
+		{"trailing whitespace on the delimiter", header + "--- \n\n# guide\n", ""},
+		{"never closed", header + "---extra stuff\n", "not closed by ---"},
+		{"run of dashes is not a delimiter", header + "----------\n---\n", "unable to parse"},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			ctx := mustLoggerCtx(t)
+			m := map[string]resources.Resource{
+				"s": textResource(t, ctx, "s", "skill://guide/SKILL.md", tc.content),
+			}
+			_, err := skills.Discover(ctx, m)
+			switch {
+			case tc.wantErr == "" && err != nil:
+				t.Fatalf("Discover() = %v, want nil", err)
+			case tc.wantErr != "" && err == nil:
+				t.Fatalf("Discover() = nil, want an error containing %q", tc.wantErr)
+			case tc.wantErr != "" && !strings.Contains(err.Error(), tc.wantErr):
+				t.Errorf("Discover() = %v, want an error containing %q", err, tc.wantErr)
+			}
+		})
+	}
+}
