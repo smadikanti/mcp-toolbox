@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 const DynamicMarker = "dynamic"
@@ -29,6 +30,13 @@ const DynamicMarker = "dynamic"
 const (
 	MaxRefs      = 512
 	MaxTotalSize = 16 << 20 // 16 MiB, summed over every ref's Size
+)
+
+// Frontmatter limits from the Agent Skills specification, which SEP-2640
+// adopts by reference.
+const (
+	maxNameLen        = 64
+	maxDescriptionLen = 1024
 )
 
 // ResourceRef is one file in a skill's manifest.
@@ -206,8 +214,18 @@ func (e Entry) Validate() error {
 	if err != nil {
 		return fmt.Errorf("invalid skill entry %q: %w", truncate(e.URI), err)
 	}
-	if _, err := requiredString(e.Frontmatter, "description"); err != nil {
+	// Checked on the frontmatter, not the uri segment: the two must be equal, so
+	// this covers both, and an invalid name is reported against the field that
+	// declares it.
+	if err := validSkillName(fmName); err != nil {
+		return fmt.Errorf("invalid skill entry %q: frontmatter name %w", truncate(e.URI), err)
+	}
+	desc, err := requiredString(e.Frontmatter, "description")
+	if err != nil {
 		return fmt.Errorf("invalid skill entry %q: %w", truncate(e.URI), err)
+	}
+	if n := utf8.RuneCountInString(desc); n > maxDescriptionLen {
+		return fmt.Errorf("invalid skill entry %q: frontmatter description is %d characters, want at most %d", truncate(e.URI), n, maxDescriptionLen)
 	}
 	if fmName != name {
 		return fmt.Errorf("invalid skill entry %q: frontmatter name %q does not match the uri's final skill-path segment %q", truncate(e.URI), truncate(fmName), name)
@@ -234,6 +252,29 @@ func (e Entry) Validate() error {
 	}
 	if !listsItself {
 		return fmt.Errorf("invalid skill entry %q: resources must list the skill's own SKILL.md", truncate(e.URI))
+	}
+	return nil
+}
+
+// validSkillName applies the Agent Skills naming rules, which SEP-2640 requires
+// of the final skill-path segment. Errors read as a suffix to "frontmatter name".
+//
+// Charset is checked first, so by the length check the name is known to be
+// ASCII and its byte count is its character count.
+func validSkillName(s string) error {
+	for _, c := range s {
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
+			return fmt.Errorf("%q may only contain lowercase letters, digits, and hyphens", truncate(s))
+		}
+	}
+	if len(s) > maxNameLen {
+		return fmt.Errorf("is %d characters, want at most %d", len(s), maxNameLen)
+	}
+	if strings.HasPrefix(s, "-") || strings.HasSuffix(s, "-") {
+		return fmt.Errorf("%q starts or ends with a hyphen", truncate(s))
+	}
+	if strings.Contains(s, "--") {
+		return fmt.Errorf("%q contains consecutive hyphens", truncate(s))
 	}
 	return nil
 }

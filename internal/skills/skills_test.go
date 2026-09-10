@@ -182,6 +182,18 @@ const (
 	digestB = "sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
 )
 
+// setSkillPath repoints an entry at the skill at skillPath, keeping its uri,
+// frontmatter, and file list in agreement so that only the name is under test.
+// The name is skillPath's final segment; anything before it is a server-chosen
+// prefix, so callers can exercise both nested and single-segment skills.
+func setSkillPath(e *skills.Entry, skillPath string) {
+	uri := "skill://" + skillPath + "/SKILL.md"
+	name := skillPath[strings.LastIndex(skillPath, "/")+1:]
+	e.URI = uri
+	e.Frontmatter = map[string]any{"name": name, "description": "Process refunds"}
+	e.Resources = skills.Manifest{Refs: []skills.ResourceRef{{URI: uri, Digest: digestA, Size: 10}}}
+}
+
 // manyRefs builds n distinctly-named well-formed refs of the given size, for
 // exercising the per-skill limits.
 func manyRefs(n int, size int64) []skills.ResourceRef {
@@ -508,6 +520,84 @@ func TestEntryValidate(t *testing.T) {
 				e.Frontmatter = map[string]any{"name": "refunds", "description": ""}
 			},
 			wantErr: "frontmatter description is empty",
+		},
+		{
+			// Uppercase is invalid per the Agent Skills naming rules. Left
+			// unchecked it would pass here and then be silently lowercased by
+			// the resources layer, breaking the name/uri agreement downstream.
+			desc: "an uppercase name",
+			mutate: func(e *skills.Entry) {
+				e.URI = "skill://Refunds/SKILL.md"
+				e.Frontmatter = map[string]any{"name": "Refunds", "description": "Process refunds"}
+				e.Resources = skills.Manifest{Refs: []skills.ResourceRef{
+					{URI: "skill://Refunds/SKILL.md", Digest: digestA, Size: 10},
+				}}
+			},
+			wantErr: "may only contain lowercase letters, digits, and hyphens",
+		},
+		{
+			desc: "an underscore is not a hyphen",
+			mutate: func(e *skills.Entry) {
+				e.Frontmatter = map[string]any{"name": "re_funds", "description": "Process refunds"}
+			},
+			wantErr: "may only contain lowercase letters",
+		},
+		{
+			desc: "a name starting with a hyphen",
+			mutate: func(e *skills.Entry) {
+				e.Frontmatter = map[string]any{"name": "-refunds", "description": "Process refunds"}
+			},
+			wantErr: "starts or ends with a hyphen",
+		},
+		{
+			desc: "a name with consecutive hyphens",
+			mutate: func(e *skills.Entry) {
+				e.Frontmatter = map[string]any{"name": "re--funds", "description": "Process refunds"}
+			},
+			wantErr: "contains consecutive hyphens",
+		},
+		{
+			desc:   "a name at the length limit",
+			mutate: func(e *skills.Entry) { setSkillPath(e, strings.Repeat("a", 64)) },
+		},
+		{
+			desc:    "a name one character past the limit",
+			mutate:  func(e *skills.Entry) { setSkillPath(e, strings.Repeat("a", 65)) },
+			wantErr: "is 65 characters, want at most 64",
+		},
+		{
+			// The limit is on the name, not the whole skill path: a prefix may
+			// push the path past 64 without making the skill invalid.
+			desc:   "a long prefix does not count against the name",
+			mutate: func(e *skills.Entry) { setSkillPath(e, strings.Repeat("p", 80)+"/refunds") },
+		},
+		{
+			// Conversely, an over-long name is still rejected when it sits in a
+			// path segment rather than the authority.
+			desc:    "an over-long name nested behind a prefix",
+			mutate:  func(e *skills.Entry) { setSkillPath(e, "acme/billing/"+strings.Repeat("a", 65)) },
+			wantErr: "is 65 characters, want at most 64",
+		},
+		{
+			desc: "a description at the length limit",
+			mutate: func(e *skills.Entry) {
+				e.Frontmatter = map[string]any{"name": "refunds", "description": strings.Repeat("d", 1024)}
+			},
+		},
+		{
+			desc: "a description one character past the limit",
+			mutate: func(e *skills.Entry) {
+				e.Frontmatter = map[string]any{"name": "refunds", "description": strings.Repeat("d", 1025)}
+			},
+			wantErr: "description is 1025 characters, want at most 1024",
+		},
+		{
+			// Counted in characters, not bytes, so a multi-byte description
+			// well under the limit is not rejected for its encoded length.
+			desc: "a multi-byte description is counted in characters",
+			mutate: func(e *skills.Entry) {
+				e.Frontmatter = map[string]any{"name": "refunds", "description": strings.Repeat("é", 1024)}
+			},
 		},
 		{
 			// The name must be recoverable from the uri alone, which only
