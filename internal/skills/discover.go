@@ -120,10 +120,12 @@ func readString(ctx context.Context, res resources.Resource) (string, error) {
 
 // Extracts the leading YAML frontmatter of a SKILL.md.
 func parseFrontmatter(content string) (map[string]any, error) {
-	// Normalise delimeter for windows
+	// Normalise invisible bytes for windows; the digest covers the bytes as read.
 	content = strings.ReplaceAll(content, "\r\n", "\n")
-	rest, ok := strings.CutPrefix(content, "---\n")
-	if !ok {
+	content = strings.TrimPrefix(content, "\ufeff")
+
+	opening, rest, ok := strings.Cut(content, "\n")
+	if !ok || strings.TrimRight(opening, " \t") != "---" {
 		return nil, fmt.Errorf("%s must open with YAML frontmatter delimited by ---", skillFile)
 	}
 	body, ok := cutAtDelimiter(rest)

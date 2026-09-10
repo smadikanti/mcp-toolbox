@@ -313,7 +313,11 @@ func TestDiscoverFrontmatterDelimiters(t *testing.T) {
 		{"closed at end of file", header + "---", ""},
 		{"horizontal rule in the body", header + "---\n\n# guide\n\n---\n\ntext\n", ""},
 		{"trailing whitespace on the delimiter", header + "--- \n\n# guide\n", ""},
+		{"trailing whitespace on the opening delimiter", "--- \n" + header[4:] + "---\n", ""},
+		{"utf-8 bom before the opening delimiter", "\ufeff" + header + "---\n", ""},
 		{"never closed", header + "---extra stuff\n", "not closed by ---"},
+		{"four dashes do not open frontmatter", "----\n" + header[4:] + "---\n", "must open with YAML frontmatter"},
+		{"leading blank line", "\n" + header + "---\n", "must open with YAML frontmatter"},
 		{"run of dashes is not a delimiter", header + "----------\n---\n", "unable to parse"},
 	}
 	for _, tc := range tcs {
