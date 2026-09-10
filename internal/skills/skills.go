@@ -263,7 +263,7 @@ func uriSegments(raw string) (string, []string, error) {
 }
 
 // underSkill reports whether ref names a file inside the skill rooted at the
-// given scheme and segments.
+// given scheme and skill path.
 func underSkill(ref, scheme string, root []string) bool {
 	s, segs, err := uriSegments(ref)
 	return err == nil && s == scheme && len(segs) > len(root) && slices.Equal(segs[:len(root)], root)
