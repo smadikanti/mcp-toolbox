@@ -242,3 +242,32 @@ func TestDiscoverNoSkills(t *testing.T) {
 		t.Errorf("got %d entries, want none", len(entries))
 	}
 }
+
+// TestDiscoverCRLFFrontmatter covers a SKILL.md checked out with Windows line
+// endings. Only the delimiters are normalised, so the digest still covers the
+// raw bytes the resource returns.
+func TestDiscoverCRLFFrontmatter(t *testing.T) {
+	ctx, err := testutils.ContextWithNewLogger()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	content := "---\r\nname: guide\r\ndescription: Windows line endings\r\n---\r\n\r\n# guide\r\n"
+	resourcesMap := map[string]resources.Resource{
+		"s": textResource(t, ctx, "s", "skill://guide/SKILL.md", content),
+	}
+
+	entries, err := skills.Discover(ctx, resourcesMap)
+	if err != nil {
+		t.Fatalf("Discover() = %v, want nil", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want 1", len(entries))
+	}
+	if name := entries[0].Frontmatter["name"]; name != "guide" {
+		t.Errorf("frontmatter name = %v, want guide", name)
+	}
+	if got, want := entries[0].Resources.Refs[0].Digest, digestOf(content); got != want {
+		t.Errorf("digest = %s, want %s — normalising must not change what is hashed", got, want)
+	}
+}

@@ -58,7 +58,9 @@ func Discover(ctx context.Context, resourcesMap map[string]resources.Resource) (
 		entries = append(entries, e)
 	}
 
-	warnOnDuplicateNames(ctx, entries)
+	if err := warnOnDuplicateNames(ctx, entries); err != nil {
+		return nil, err
+	}
 	return entries, nil
 }
 
@@ -85,7 +87,7 @@ func buildEntry(ctx context.Context, root string, resourcesMap map[string]resour
 
 	members := make([]resources.Resource, 0, 8)
 	for _, res := range resourcesMap {
-		if uri := res.GetURI(); uri == skillURI || strings.HasPrefix(uri, root+"/") {
+		if strings.HasPrefix(res.GetURI(), root+"/") {
 			members = append(members, res)
 		}
 	}
@@ -133,6 +135,8 @@ func readString(ctx context.Context, res resources.Resource) (string, error) {
 // Agent Skills specification requires it, so its absence is an error rather
 // than an empty map.
 func parseFrontmatter(content string) (map[string]any, error) {
+	// Only the delimiters are normalised; the digest is taken over raw bytes.
+	content = strings.ReplaceAll(content, "\r\n", "\n")
 	rest, ok := strings.CutPrefix(content, "---\n")
 	if !ok {
 		return nil, fmt.Errorf("%s must open with YAML frontmatter delimited by ---", skillFile)
@@ -152,10 +156,10 @@ func parseFrontmatter(content string) (map[string]any, error) {
 // warnOnDuplicateNames reports skills sharing a frontmatter name. SEP-2640
 // permits it and requires hosts to disambiguate, so this is a warning: it is
 // legal, but rarely what an operator intended.
-func warnOnDuplicateNames(ctx context.Context, entries []Entry) {
+func warnOnDuplicateNames(ctx context.Context, entries []Entry) error {
 	logger, err := util.LoggerFromContext(ctx)
 	if err != nil {
-		return
+		return err
 	}
 	byName := map[string][]string{}
 	for _, e := range entries {
@@ -173,4 +177,5 @@ func warnOnDuplicateNames(ctx context.Context, entries []Entry) {
 			logger.WarnContext(ctx, fmt.Sprintf("skills %s share the name %q; hosts must disambiguate them", strings.Join(uris, ", "), name))
 		}
 	}
+	return nil
 }
