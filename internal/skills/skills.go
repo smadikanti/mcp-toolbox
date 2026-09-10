@@ -214,10 +214,23 @@ func (e Entry) Validate() error {
 		return fmt.Errorf("invalid skill entry %q: uri must address the skill's SKILL.md", truncate(e.URI))
 	}
 	root := segs[:len(segs)-1]
-	// The last segment before SKILL.md is the skill name
-	name := root[len(root)-1]
 
-	// Checked before the manifest: identity binds a dynamic skill too.
+	// Identity is checked before the manifest: it binds a dynamic skill too.
+	if err := e.validateFrontmatter(root[len(root)-1]); err != nil {
+		return err
+	}
+	if err := e.Resources.Validate(); err != nil {
+		return fmt.Errorf("skill %q: %w", truncate(e.URI), err)
+	}
+	if e.Resources.Dynamic {
+		return nil
+	}
+	return e.validateRefs(scheme, root)
+}
+
+// validateFrontmatter checks the fields the Agent Skills specification requires,
+// and their agreement with name, the skill name taken from the uri.
+func (e Entry) validateFrontmatter(name string) error {
 	fmName, err := requiredString(e.Frontmatter, "name")
 	if err != nil {
 		return fmt.Errorf("invalid skill entry %q: %w", truncate(e.URI), err)
@@ -238,16 +251,13 @@ func (e Entry) Validate() error {
 	if fmName != name {
 		return fmt.Errorf("invalid skill entry %q: frontmatter name %q does not match the uri's final skill-path segment %q", truncate(e.URI), truncate(fmName), truncate(name))
 	}
+	return nil
+}
 
-	if err := e.Resources.Validate(); err != nil {
-		return fmt.Errorf("skill %q: %w", truncate(e.URI), err)
-	}
-	if e.Resources.Dynamic {
-		return nil
-	}
-
-	// A host resolves reads only to URIs the list carries, so a skill omitting
-	// its own SKILL.md cannot be loaded at all.
+// validateRefs checks that a file list names only files inside the skill, and
+// that it names the skill's own SKILL.md. A host resolves reads only to listed
+// URIs, so a skill omitting itself cannot be loaded at all.
+func (e Entry) validateRefs(scheme string, root []string) error {
 	var listsItself bool
 	for _, r := range e.Resources.Refs {
 		if r.URI == e.URI {

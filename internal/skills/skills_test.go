@@ -124,6 +124,13 @@ func TestManifestUnmarshalJSON(t *testing.T) {
 			in:      `true`,
 			wantErr: "must be an array",
 		},
+		{
+			// Dispatches to the array branch on the first byte, then fails
+			// decoding the element.
+			desc:    "a malformed ref in a well-formed list",
+			in:      `[{"uri":123}]`,
+			wantErr: "cannot unmarshal",
+		},
 	}
 
 	for _, tc := range tcs {
@@ -166,6 +173,21 @@ func TestManifestUnmarshalBoundsTheOffendingString(t *testing.T) {
 	}
 }
 
+// TestManifestUnmarshalKeepsShortMultibyteStrings pins that truncation counts
+// characters, not bytes: this string is over the byte guard but under the
+// limit, so it must survive intact.
+func TestManifestUnmarshalKeepsShortMultibyteStrings(t *testing.T) {
+	marker := strings.Repeat("é", 40) // 80 bytes, 40 runes
+	var m skills.Manifest
+	err := json.Unmarshal([]byte(`"`+marker+`"`), &m)
+	if err == nil {
+		t.Fatal("Unmarshal() = nil, want an error")
+	}
+	if !strings.Contains(err.Error(), marker) {
+		t.Errorf("Unmarshal() = %v, want the marker reported in full", err)
+	}
+}
+
 // TestManifestUnmarshalEmptyInput covers the first-byte dispatch guard, which
 // only a direct call can reach — but the method is exported.
 func TestManifestUnmarshalEmptyInput(t *testing.T) {
@@ -176,6 +198,11 @@ func TestManifestUnmarshalEmptyInput(t *testing.T) {
 	}
 	if want := "no value"; !strings.Contains(err.Error(), want) {
 		t.Errorf("UnmarshalJSON() = %v, want error containing %q", err, want)
+	}
+
+	// Dispatches to the string branch on the first byte, then fails decoding.
+	if err := m.UnmarshalJSON([]byte(`"unterminated`)); err == nil {
+		t.Error("UnmarshalJSON() = nil, want an error")
 	}
 }
 
@@ -284,8 +311,21 @@ func TestManifestValidate(t *testing.T) {
 			wantErr: "want sha256:",
 		},
 		{
-			desc:    "uppercase digest is not folded",
+			desc:    "an uppercase algorithm prefix",
 			in:      skills.Manifest{Refs: []skills.ResourceRef{{URI: "skill://x/SKILL.md", Digest: strings.ToUpper(digestA), Size: 1}}},
+			wantErr: "want sha256:",
+		},
+		{
+			// Distinct from the case above, which fails on the prefix before
+			// reaching the hex check: here the prefix is well-formed and only
+			// the digits are uppercase.
+			desc:    "uppercase hex is not folded",
+			in:      skills.Manifest{Refs: []skills.ResourceRef{{URI: "skill://x/SKILL.md", Digest: "sha256:" + strings.ToUpper(strings.TrimPrefix(digestA, "sha256:")), Size: 1}}},
+			wantErr: "want sha256:",
+		},
+		{
+			desc:    "a non-hex character in the digest",
+			in:      skills.Manifest{Refs: []skills.ResourceRef{{URI: "skill://x/SKILL.md", Digest: "sha256:z" + strings.TrimPrefix(digestA, "sha256:")[1:], Size: 1}}},
 			wantErr: "want sha256:",
 		},
 		{
@@ -418,6 +458,11 @@ func TestEntryUnmarshalJSON(t *testing.T) {
 			in:      `{"uri":"skill://x/SKILL.md","frontmatter":{"name":"x"},"resources":[]}`,
 			wantErr: "names at least the skill's SKILL.md",
 		},
+		{
+			desc:    "an entry that is not an object",
+			in:      `["skill://x/SKILL.md"]`,
+			wantErr: "invalid skill entry",
+		},
 	}
 
 	for _, tc := range tcs {
@@ -501,6 +546,11 @@ func TestEntryValidate(t *testing.T) {
 			desc:    "uri needs a skill-path segment",
 			mutate:  func(e *skills.Entry) { e.URI = "skill://SKILL.md" },
 			wantErr: "uri must address the skill's SKILL.md",
+		},
+		{
+			desc:    "an unparseable uri",
+			mutate:  func(e *skills.Entry) { e.URI = "skill://host:port/SKILL.md" },
+			wantErr: "is not a valid uri",
 		},
 		{
 			desc:    "a scheme-less uri",
