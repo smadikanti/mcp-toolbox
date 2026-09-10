@@ -154,26 +154,27 @@ type Entry struct {
 
 // UnmarshalJSON rejects an entry carrying no resources
 func (e *Entry) UnmarshalJSON(data []byte) error {
-	// plainEntry drops this method, so decoding the rest does not recurse.
-	// Resources shadows the promoted field to tell an absent key from a null one.
-	type plainEntry Entry
-	target := struct {
-		*plainEntry
+	// Use a type alias to prevent an infinite recursion loop. The alias has the
+	// same fields but lacks the UnmarshalJSON method. Resources shadows the
+	// promoted field to tell an absent key from a null one.
+	type entryAlias Entry
+	raw := struct {
+		*entryAlias
 		Resources json.RawMessage `json:"resources"`
-	}{plainEntry: (*plainEntry)(e)}
+	}{entryAlias: (*entryAlias)(e)}
 
 	// Cleared so a decode replaces the frontmatter rather than merging into
 	// whatever was there: encoding/json unions into a non-nil map, and the spec
 	// requires frontmatter to be a verbatim copy.
 	e.Frontmatter = nil
 
-	if err := json.Unmarshal(data, &target); err != nil {
+	if err := json.Unmarshal(data, &raw); err != nil {
 		return fmt.Errorf("invalid skill entry: %w", err)
 	}
-	if target.Resources == nil {
+	if raw.Resources == nil {
 		return fmt.Errorf("invalid skill entry %q: resources is required", truncate(e.URI))
 	}
-	return e.Resources.UnmarshalJSON(target.Resources)
+	return e.Resources.UnmarshalJSON(raw.Resources)
 }
 
 // Validate checks the rules relating a manifest to the skill's own identity.
