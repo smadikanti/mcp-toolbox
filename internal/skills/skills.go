@@ -73,7 +73,7 @@ func (m *Manifest) UnmarshalJSON(data []byte) error {
 	}
 
 	switch data[0] {
-	case '"':
+	case '"': // dynamic
 		var marker string
 		if err := json.Unmarshal(data, &marker); err != nil {
 			return fmt.Errorf("invalid skill manifest: %w", err)
@@ -84,7 +84,7 @@ func (m *Manifest) UnmarshalJSON(data []byte) error {
 		m.Dynamic, m.Refs = true, nil
 		return nil
 
-	case '[':
+	case '[': // resources list for skill
 		var refs []ResourceRef
 		if err := json.Unmarshal(data, &refs); err != nil {
 			return fmt.Errorf("invalid skill manifest: %w", err)
@@ -147,8 +147,7 @@ func (m Manifest) Validate() error {
 type Entry struct {
 	// URI addresses the skill's SKILL.md, not its root directory.
 	URI string `json:"uri"`
-	// Frontmatter is the SKILL.md YAML frontmatter verbatim. A host compares it
-	// field by field against the file it fetches.
+	// Frontmatter is the SKILL.md YAML frontmatter verbatim
 	Frontmatter map[string]any `json:"frontmatter"`
 	Resources   Manifest       `json:"resources"`
 }
