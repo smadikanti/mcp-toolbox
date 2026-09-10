@@ -59,10 +59,10 @@ func skillRoots(resourcesMap map[string]resources.Resource) []string {
 	var roots []string
 	for _, res := range resourcesMap {
 		uri := res.GetURI()
-		if !strings.HasPrefix(uri, resources.SkillScheme + "://") {
+		if !strings.HasPrefix(uri, resources.SkillScheme+"://") {
 			continue
 		}
-		if root, ok := strings.CutSuffix(uri, "/" + skillFile); ok {
+		if root, ok := strings.CutSuffix(uri, "/"+skillFile); ok {
 			roots = append(roots, root)
 		}
 	}
@@ -76,7 +76,7 @@ func buildEntry(ctx context.Context, root string, resourcesMap map[string]resour
 
 	members := make([]resources.Resource, 0, 8)
 	for _, res := range resourcesMap {
-		if strings.HasPrefix(res.GetURI(), root + "/") {
+		if strings.HasPrefix(res.GetURI(), root+"/") {
 			members = append(members, res)
 		}
 	}
