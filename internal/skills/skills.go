@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -188,26 +190,32 @@ func (e *Entry) UnmarshalJSON(data []byte) error {
 		Resources json.RawMessage `json:"resources"`
 	}{entry: (*entry)(e)}
 
+	// Cleared so a decode replaces the frontmatter rather than merging into
+	// whatever was there: encoding/json unions into a non-nil map, and the spec
+	// requires frontmatter to be a verbatim copy.
+	e.Frontmatter = nil
+
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return fmt.Errorf("invalid skill entry: %w", err)
 	}
 	if aux.Resources == nil {
-		return fmt.Errorf("invalid skill entry %q: resources is required", e.URI)
+		return fmt.Errorf("invalid skill entry %q: resources is required", truncate(e.URI))
 	}
 	return e.Resources.UnmarshalJSON(aux.Resources)
 }
 
 // Validate checks the rules relating a manifest to the skill's own identity.
 func (e Entry) Validate() error {
-	root, ok := strings.CutSuffix(e.URI, "/SKILL.md")
-	if !ok || root == "" {
+	scheme, segs, err := uriSegments(e.URI)
+	if err != nil {
+		return fmt.Errorf("invalid skill entry %q: uri %w", truncate(e.URI), err)
+	}
+	if len(segs) < 2 || segs[len(segs)-1] != "SKILL.md" {
 		return fmt.Errorf("invalid skill entry %q: uri must address the skill's SKILL.md", truncate(e.URI))
 	}
+	root := segs[:len(segs)-1]
 	// The last segment before SKILL.md is the skill name
-	name := root[strings.LastIndex(root, "/")+1:]
-	if name == "" {
-		return fmt.Errorf("invalid skill entry %q: uri has no skill-path segment before SKILL.md", truncate(e.URI))
-	}
+	name := root[len(root)-1]
 
 	// Checked before the manifest: identity binds a dynamic skill too.
 	fmName, err := requiredString(e.Frontmatter, "name")
@@ -228,7 +236,7 @@ func (e Entry) Validate() error {
 		return fmt.Errorf("invalid skill entry %q: frontmatter description is %d characters, want at most %d", truncate(e.URI), n, maxDescriptionLen)
 	}
 	if fmName != name {
-		return fmt.Errorf("invalid skill entry %q: frontmatter name %q does not match the uri's final skill-path segment %q", truncate(e.URI), truncate(fmName), name)
+		return fmt.Errorf("invalid skill entry %q: frontmatter name %q does not match the uri's final skill-path segment %q", truncate(e.URI), truncate(fmName), truncate(name))
 	}
 
 	if err := e.Resources.Validate(); err != nil {
@@ -246,7 +254,7 @@ func (e Entry) Validate() error {
 			listsItself = true
 			continue
 		}
-		if !strings.HasPrefix(r.URI, root+"/") {
+		if !underSkill(r.URI, scheme, root) {
 			return fmt.Errorf("invalid skill entry %q: %q is not a file within the skill", truncate(e.URI), truncate(r.URI))
 		}
 	}
@@ -254,6 +262,41 @@ func (e Entry) Validate() error {
 		return fmt.Errorf("invalid skill entry %q: resources must list the skill's own SKILL.md", truncate(e.URI))
 	}
 	return nil
+}
+
+// uriSegments splits a URI into its scheme and path segments, the authority
+// counting as the first segment per SEP-2640. Empty and dot segments are
+// rejected, which is what stops a ref climbing out of its skill; url.Parse
+// decodes percent-escapes first, so %2e%2e cannot smuggle one past. Errors read
+// as a suffix to "uri".
+func uriSegments(raw string) (string, []string, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", nil, fmt.Errorf("is not a valid uri")
+	}
+	if u.Scheme == "" {
+		return "", nil, fmt.Errorf("has no scheme")
+	}
+	if u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+		return "", nil, fmt.Errorf("must be a bare path, with no query, fragment, or userinfo")
+	}
+	segs := []string{u.Host}
+	if rest := strings.TrimPrefix(u.Path, "/"); rest != "" {
+		segs = append(segs, strings.Split(rest, "/")...)
+	}
+	for _, s := range segs {
+		if s == "" || s == "." || s == ".." {
+			return "", nil, fmt.Errorf("has an empty or relative path segment")
+		}
+	}
+	return u.Scheme, segs, nil
+}
+
+// underSkill reports whether ref names a file inside the skill rooted at the
+// given scheme and segments. Equal length means the root itself, a directory.
+func underSkill(ref, scheme string, root []string) bool {
+	s, segs, err := uriSegments(ref)
+	return err == nil && s == scheme && len(segs) > len(root) && slices.Equal(segs[:len(root)], root)
 }
 
 // validSkillName applies the Agent Skills naming rules, which SEP-2640 requires

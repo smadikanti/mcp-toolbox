@@ -170,8 +170,12 @@ func TestManifestUnmarshalBoundsTheOffendingString(t *testing.T) {
 // only a direct call can reach — but the method is exported.
 func TestManifestUnmarshalEmptyInput(t *testing.T) {
 	var m skills.Manifest
-	if err := m.UnmarshalJSON([]byte("  ")); err == nil {
-		t.Error("UnmarshalJSON() = nil, want an error")
+	err := m.UnmarshalJSON([]byte("  "))
+	if err == nil {
+		t.Fatal("UnmarshalJSON() = nil, want an error")
+	}
+	if want := "no value"; !strings.Contains(err.Error(), want) {
+		t.Errorf("UnmarshalJSON() = %v, want error containing %q", err, want)
 	}
 }
 
@@ -181,6 +185,12 @@ const (
 	digestA = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	digestB = "sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
 )
+
+// addRef appends a well-formed ref at the given uri, so that only the uri is
+// under test.
+func addRef(e *skills.Entry, uri string) {
+	e.Resources.Refs = append(e.Resources.Refs, skills.ResourceRef{URI: uri, Digest: digestA, Size: 5})
+}
 
 // setSkillPath repoints an entry at the skill at skillPath, keeping its uri,
 // frontmatter, and file list in agreement so that only the name is under test.
@@ -489,13 +499,23 @@ func TestEntryValidate(t *testing.T) {
 		},
 		{
 			desc:    "uri needs a skill-path segment",
-			mutate:  func(e *skills.Entry) { e.URI = "/SKILL.md" },
+			mutate:  func(e *skills.Entry) { e.URI = "skill://SKILL.md" },
 			wantErr: "uri must address the skill's SKILL.md",
 		},
 		{
-			desc:    "an empty path segment is not a skill name",
-			mutate:  func(e *skills.Entry) { e.URI = "skill://acme/billing//SKILL.md" },
-			wantErr: "no skill-path segment before SKILL.md",
+			desc:    "a scheme-less uri",
+			mutate:  func(e *skills.Entry) { e.URI = "refunds/SKILL.md" },
+			wantErr: "uri has no scheme",
+		},
+		{
+			desc:    "an empty path segment",
+			mutate:  func(e *skills.Entry) { e.URI = "skill://acme/billing//refunds/SKILL.md" },
+			wantErr: "empty or relative path segment",
+		},
+		{
+			desc:    "a query string is not part of a skill uri",
+			mutate:  func(e *skills.Entry) { e.URI = "skill://acme/billing/refunds/SKILL.md?v=2" },
+			wantErr: "must be a bare path",
 		},
 		{
 			desc:    "frontmatter is required",
@@ -626,21 +646,43 @@ func TestEntryValidate(t *testing.T) {
 			wantErr: "must list the skill's own SKILL.md",
 		},
 		{
-			desc: "a file outside the skill directory",
-			mutate: func(e *skills.Entry) {
-				e.Resources.Refs = append(e.Resources.Refs,
-					skills.ResourceRef{URI: "skill://acme/billing/invoices/secret.md", Digest: digestA, Size: 5})
-			},
+			desc:    "a file outside the skill directory",
+			mutate:  func(e *skills.Entry) { addRef(e, "skill://acme/billing/invoices/secret.md") },
+			wantErr: "is not a file within the skill",
+		},
+		{
+			// A ref may sit under the skill's prefix as a string and still name
+			// a file outside it. Approval binds to the resources set, so a
+			// traversing ref would launder a foreign file into it.
+			desc:    "a ref climbing out of the skill",
+			mutate:  func(e *skills.Entry) { addRef(e, "skill://acme/billing/refunds/../invoices/secret.md") },
+			wantErr: "is not a file within the skill",
+		},
+		{
+			desc:    "a ref climbing out via percent-encoded dots",
+			mutate:  func(e *skills.Entry) { addRef(e, "skill://acme/billing/refunds/%2e%2e/secret.md") },
+			wantErr: "is not a file within the skill",
+		},
+		{
+			desc:    "a ref naming a directory",
+			mutate:  func(e *skills.Entry) { addRef(e, "skill://acme/billing/refunds/examples/") },
+			wantErr: "is not a file within the skill",
+		},
+		{
+			desc:    "a ref naming the skill root",
+			mutate:  func(e *skills.Entry) { addRef(e, "skill://acme/billing/refunds") },
+			wantErr: "is not a file within the skill",
+		},
+		{
+			desc:    "a ref under a different scheme",
+			mutate:  func(e *skills.Entry) { addRef(e, "file://acme/billing/refunds/notes.md") },
 			wantErr: "is not a file within the skill",
 		},
 		{
 			// A sibling whose path merely starts with the skill's name is not
 			// inside it; the prefix test has to include the separator.
-			desc: "a sibling sharing the name prefix",
-			mutate: func(e *skills.Entry) {
-				e.Resources.Refs = append(e.Resources.Refs,
-					skills.ResourceRef{URI: "skill://acme/billing/refunds-archive/old.md", Digest: digestA, Size: 5})
-			},
+			desc:    "a sibling sharing the name prefix",
+			mutate:  func(e *skills.Entry) { addRef(e, "skill://acme/billing/refunds-archive/old.md") },
 			wantErr: "is not a file within the skill",
 		},
 		{
@@ -674,13 +716,35 @@ func TestEntryValidate(t *testing.T) {
 	}
 }
 
+// TestEntryMarshalsFrontmatterAsObject pins the whole output rather than the
+// absence of null, so dropping the required field would fail too.
 func TestEntryMarshalsFrontmatterAsObject(t *testing.T) {
 	got, err := json.Marshal(skills.Entry{})
 	if err != nil {
 		t.Fatalf("Marshal() = %v, want nil", err)
 	}
-	if strings.Contains(string(got), `"frontmatter":null`) {
-		t.Errorf("Marshal() = %s, want frontmatter to stay an object", got)
+	if want := `{"uri":"","frontmatter":{},"resources":[]}`; string(got) != want {
+		t.Errorf("Marshal() = %s, want %s", got, want)
+	}
+}
+
+// TestEntryUnmarshalReplacesFrontmatter covers encoding/json unioning into a
+// non-nil map: decoding into a reused Entry would otherwise leave the
+// frontmatter a merge of both rather than the verbatim copy the spec requires.
+//
+// Two frontmatter keys in one object still merge, since that happens within a
+// single decode. Duplicate keys are undefined in JSON and the result cannot
+// match any real SKILL.md, so a host rejects it on the field-by-field compare.
+func TestEntryUnmarshalReplacesFrontmatter(t *testing.T) {
+	var e skills.Entry
+	if err := json.Unmarshal([]byte(`{"uri":"skill://a/SKILL.md","frontmatter":{"name":"a","only-in-a":1},"resources":"dynamic"}`), &e); err != nil {
+		t.Fatalf("Unmarshal() = %v, want nil", err)
+	}
+	if err := json.Unmarshal([]byte(`{"uri":"skill://b/SKILL.md","frontmatter":{"name":"b"},"resources":"dynamic"}`), &e); err != nil {
+		t.Fatalf("Unmarshal() = %v, want nil", err)
+	}
+	if diff := cmp.Diff(map[string]any{"name": "b"}, e.Frontmatter); diff != "" {
+		t.Errorf("Frontmatter mismatch (-want +got):\n%s", diff)
 	}
 }
 
