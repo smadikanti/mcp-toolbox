@@ -152,29 +152,27 @@ type Entry struct {
 	Resources   Manifest       `json:"resources"`
 }
 
-// UnmarshalJSON rejects an entry carrying no resources
+// UnmarshalJSON rejects an entry carrying no resources. Decoding into a local
+// struct keeps every field of Entry listed here: resources is held raw to tell
+// an absent key from a null one, and the fresh map replaces the frontmatter
+// rather than merging into it, as encoding/json would with a non-nil map.
 func (e *Entry) UnmarshalJSON(data []byte) error {
-	// Use a type alias to prevent an infinite recursion loop. The alias has the
-	// same fields but lacks the UnmarshalJSON method. Resources shadows the
-	// promoted field to tell an absent key from a null one.
-	type entryAlias Entry
-	raw := struct {
-		*entryAlias
-		Resources json.RawMessage `json:"resources"`
-	}{entryAlias: (*entryAlias)(e)}
-
-	// Cleared so a decode replaces the frontmatter rather than merging into
-	// whatever was there: encoding/json unions into a non-nil map, and the spec
-	// requires frontmatter to be a verbatim copy.
-	e.Frontmatter = nil
-
-	if err := json.Unmarshal(data, &raw); err != nil {
+	var fields struct {
+		URI         string          `json:"uri"`
+		Frontmatter map[string]any  `json:"frontmatter"`
+		Resources   json.RawMessage `json:"resources"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
 		return fmt.Errorf("invalid skill entry: %w", err)
 	}
-	if raw.Resources == nil {
-		return fmt.Errorf("invalid skill entry %q: resources is required", truncate(e.URI))
+	if fields.Resources == nil {
+		return fmt.Errorf("invalid skill entry %q: resources is required", truncate(fields.URI))
 	}
-	return e.Resources.UnmarshalJSON(raw.Resources)
+	if err := e.Resources.UnmarshalJSON(fields.Resources); err != nil {
+		return err
+	}
+	e.URI, e.Frontmatter = fields.URI, fields.Frontmatter
+	return nil
 }
 
 // Validate checks the rules relating a manifest to the skill's own identity.

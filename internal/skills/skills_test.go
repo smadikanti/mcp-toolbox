@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -773,6 +774,15 @@ func TestEntryValidate(t *testing.T) {
 // Two frontmatter keys in one object still merge, since that happens within a
 // single decode. Duplicate keys are undefined in JSON and the result cannot
 // match any real SKILL.md, so a host rejects it on the field-by-field compare.
+// TestEntryFieldCount is a tripwire. Entry.UnmarshalJSON restates Entry's
+// fields in a local struct, so a field added to one and not the other would be
+// dropped on decode without any test failing.
+func TestEntryFieldCount(t *testing.T) {
+	if got := reflect.TypeOf(skills.Entry{}).NumField(); got != 3 {
+		t.Errorf("Entry has %d fields, want 3: add the new one to Entry.UnmarshalJSON, then update this test", got)
+	}
+}
+
 func TestEntryUnmarshalReplacesFrontmatter(t *testing.T) {
 	var e skills.Entry
 	if err := json.Unmarshal([]byte(`{"uri":"skill://a/SKILL.md","frontmatter":{"name":"a","only-in-a":1},"resources":"dynamic"}`), &e); err != nil {
