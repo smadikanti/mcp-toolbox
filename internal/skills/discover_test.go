@@ -271,3 +271,30 @@ func TestDiscoverCRLFFrontmatter(t *testing.T) {
 		t.Errorf("digest = %s, want %s — normalising must not change what is hashed", got, want)
 	}
 }
+
+// TestDiscoverNoLogger covers the boot-time contract: discovery needs a logger
+// to report duplicate names, and a context without one is a wiring error
+// rather than a condition to skip past silently.
+func TestDiscoverNoLogger(t *testing.T) {
+	resourcesMap := map[string]resources.Resource{
+		"s": textResource(t, mustLoggerCtx(t), "s", "skill://guide/SKILL.md",
+			"---\nname: guide\ndescription: A guide\n---\n\n# guide\n"),
+	}
+
+	_, err := skills.Discover(context.Background(), resourcesMap)
+	if err == nil {
+		t.Fatal("Discover() with no logger in context = nil, want an error")
+	}
+	if !strings.Contains(err.Error(), "duplicate skill names") {
+		t.Errorf("error = %q, want it to name the operation that failed", err)
+	}
+}
+
+func mustLoggerCtx(t *testing.T) context.Context {
+	t.Helper()
+	ctx, err := testutils.ContextWithNewLogger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ctx
+}

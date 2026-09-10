@@ -159,7 +159,7 @@ func parseFrontmatter(content string) (map[string]any, error) {
 func warnOnDuplicateNames(ctx context.Context, entries []Entry) error {
 	logger, err := util.LoggerFromContext(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("checking for duplicate skill names: %w", err)
 	}
 	byName := map[string][]string{}
 	for _, e := range entries {
