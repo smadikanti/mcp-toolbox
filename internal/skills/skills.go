@@ -224,12 +224,11 @@ func (e Entry) validateFrontmatter(name string) error {
 func (e Entry) validateRefs(scheme string, root []string) error {
 	var listsItself bool
 	for _, r := range e.Resources.Refs {
-		if r.URI == e.URI {
-			listsItself = true
-			continue
-		}
 		if !underSkill(r.URI, scheme, root) {
 			return fmt.Errorf("invalid skill entry %q: %q is not a file within the skill", truncate(e.URI), truncate(r.URI))
+		}
+		if r.URI == e.URI {
+			listsItself = true
 		}
 	}
 	if !listsItself {
@@ -276,8 +275,10 @@ func validSkillName(s string) error {
 			return fmt.Errorf("%q may only contain lowercase letters, digits, and hyphens", truncate(s))
 		}
 	}
-	if len(s) > maxNameLen {
-		return fmt.Errorf("is %d characters, want at most %d", len(s), maxNameLen)
+	// The lower bound matters as much as the upper: without it an empty name is
+	// only rejected because requiredString happens to run first.
+	if s == "" || len(s) > maxNameLen {
+		return fmt.Errorf("is %d characters, want 1 to %d", len(s), maxNameLen)
 	}
 	if strings.HasPrefix(s, "-") || strings.HasSuffix(s, "-") {
 		return fmt.Errorf("%q starts or ends with a hyphen", truncate(s))

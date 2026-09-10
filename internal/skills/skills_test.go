@@ -634,7 +634,7 @@ func TestEntryValidate(t *testing.T) {
 		{
 			desc:    "a name one character past the limit",
 			mutate:  func(e *skills.Entry) { setSkillPath(e, strings.Repeat("a", 65)) },
-			wantErr: "is 65 characters, want at most 64",
+			wantErr: "is 65 characters, want 1 to 64",
 		},
 		{
 			// The limit is on the name, not the whole skill path: a prefix may
@@ -647,7 +647,7 @@ func TestEntryValidate(t *testing.T) {
 			// path segment rather than the authority.
 			desc:    "an over-long name nested behind a prefix",
 			mutate:  func(e *skills.Entry) { setSkillPath(e, "acme/billing/"+strings.Repeat("a", 65)) },
-			wantErr: "is 65 characters, want at most 64",
+			wantErr: "is 65 characters, want 1 to 64",
 		},
 		{
 			desc: "a description at the length limit",
