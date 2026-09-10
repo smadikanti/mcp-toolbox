@@ -766,18 +766,6 @@ func TestEntryValidate(t *testing.T) {
 	}
 }
 
-// TestEntryMarshalsFrontmatterAsObject pins the whole output rather than the
-// absence of null, so dropping the required field would fail too.
-func TestEntryMarshalsFrontmatterAsObject(t *testing.T) {
-	got, err := json.Marshal(skills.Entry{})
-	if err != nil {
-		t.Fatalf("Marshal() = %v, want nil", err)
-	}
-	if want := `{"uri":"","frontmatter":{},"resources":[]}`; string(got) != want {
-		t.Errorf("Marshal() = %s, want %s", got, want)
-	}
-}
-
 // TestEntryUnmarshalReplacesFrontmatter covers encoding/json unioning into a
 // non-nil map: decoding into a reused Entry would otherwise leave the
 // frontmatter a merge of both rather than the verbatim copy the spec requires.

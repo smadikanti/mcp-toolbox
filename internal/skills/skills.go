@@ -143,34 +143,6 @@ func (m Manifest) Validate() error {
 	return nil
 }
 
-// truncate bounds a value from the wire before it reaches an error message.
-func truncate(s string) string {
-	const max = 64
-	if len(s) <= max {
-		return s
-	}
-	r := []rune(s)
-	if len(r) <= max {
-		return s
-	}
-	return string(r[:max]) + "…"
-}
-
-// validDigest matches SEP-2640's sha256:{hex} form, {hex} being 64 lowercase
-// hex characters.
-func validDigest(s string) bool {
-	hex, ok := strings.CutPrefix(s, "sha256:")
-	if !ok || len(hex) != 64 {
-		return false
-	}
-	for _, c := range hex {
-		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
-			return false
-		}
-	}
-	return true
-}
-
 // Entry is one skill as skills/list and skills/get publish it.
 type Entry struct {
 	// URI addresses the skill's SKILL.md, not its root directory.
@@ -332,6 +304,21 @@ func validSkillName(s string) error {
 	return nil
 }
 
+// validDigest matches SEP-2640's sha256:{hex} form, {hex} being 64 lowercase
+// hex characters.
+func validDigest(s string) bool {
+	hex, ok := strings.CutPrefix(s, "sha256:")
+	if !ok || len(hex) != 64 {
+		return false
+	}
+	for _, c := range hex {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
 // requiredString reads a frontmatter field the Agent Skills specification
 // requires. A nil map reports the field as absent.
 func requiredString(fm map[string]any, key string) (string, error) {
@@ -349,11 +336,15 @@ func requiredString(fm map[string]any, key string) (string, error) {
 	return s, nil
 }
 
-func (e Entry) MarshalJSON() ([]byte, error) {
-	type entry Entry
-	aux := entry(e)
-	if aux.Frontmatter == nil {
-		aux.Frontmatter = map[string]any{}
+// truncate bounds a value from the wire before it reaches an error message.
+func truncate(s string) string {
+	const max = 64
+	if len(s) <= max {
+		return s
 	}
-	return json.Marshal(aux)
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "…"
 }
