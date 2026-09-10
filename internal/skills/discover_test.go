@@ -1,0 +1,244 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package skills_test
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"strings"
+	"testing"
+
+	"github.com/googleapis/mcp-toolbox/internal/resources"
+	"github.com/googleapis/mcp-toolbox/internal/resources/text"
+	"github.com/googleapis/mcp-toolbox/internal/skills"
+	"github.com/googleapis/mcp-toolbox/internal/testutils"
+)
+
+// textResource builds a real text resource rather than a mock, so discovery is
+// exercised against the same Read path a hand-declared skill uses.
+func textResource(t *testing.T, ctx context.Context, name, uri, content string) resources.Resource {
+	t.Helper()
+	cfg := &text.Config{
+		ResourceConfigBase: resources.ResourceConfigBase{
+			ConfigBase: resources.ConfigBase{Name: name, Type: "text", MimeType: "text/markdown"},
+			URI:        uri,
+		},
+		Text: content,
+	}
+	res, err := cfg.Initialize(ctx)
+	if err != nil {
+		t.Fatalf("unable to initialize %q: %s", uri, err)
+	}
+	return res
+}
+
+func skillMD(name, description string) string {
+	return fmt.Sprintf("---\nname: %s\ndescription: %s\n---\n\n# %s\n", name, description, name)
+}
+
+func digestOf(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func TestDiscover(t *testing.T) {
+	ctx, err := testutils.ContextWithNewLogger()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const (
+		mdBody      = "# Common queries\n"
+		unrelatedMD = "not part of any skill"
+	)
+	skillDoc := skillMD("analytics-guide", "Query and summarize the warehouse")
+
+	resourcesMap := map[string]resources.Resource{
+		"guide/SKILL.md": textResource(t, ctx, "guide/SKILL.md",
+			"skill://analytics-guide/SKILL.md", skillDoc),
+		"guide/queries": textResource(t, ctx, "guide/queries",
+			"skill://analytics-guide/references/queries.md", mdBody),
+		// Neither of these belongs to the skill: one is an ordinary resource,
+		// the other shares a name prefix but not a path prefix.
+		"docs": textResource(t, ctx, "docs", "file://project-docs", unrelatedMD),
+		"decoy": textResource(t, ctx, "decoy",
+			"skill://analytics-guide-v2/SKILL.md", skillMD("analytics-guide-v2", "A different skill")),
+	}
+
+	entries, err := skills.Discover(ctx, resourcesMap)
+	if err != nil {
+		t.Fatalf("Discover() = %v, want nil", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("got %d entries, want 2 (analytics-guide and analytics-guide-v2)", len(entries))
+	}
+
+	got := entries[0]
+	if got.URI != "skill://analytics-guide/SKILL.md" {
+		t.Errorf("URI = %q, want the SKILL.md URI", got.URI)
+	}
+	if name := got.Frontmatter["name"]; name != "analytics-guide" {
+		t.Errorf("frontmatter name = %v, want analytics-guide", name)
+	}
+	if got.Resources.Dynamic {
+		t.Error("Dynamic = true, want a static manifest")
+	}
+
+	// Two files, sorted by URI, each digested over the bytes Read returns.
+	want := []skills.ResourceRef{
+		{URI: "skill://analytics-guide/SKILL.md", Digest: digestOf(skillDoc), Size: int64(len(skillDoc))},
+		{URI: "skill://analytics-guide/references/queries.md", Digest: digestOf(mdBody), Size: int64(len(mdBody))},
+	}
+	if len(got.Resources.Refs) != len(want) {
+		t.Fatalf("got %d refs, want %d: %+v", len(got.Resources.Refs), len(want), got.Resources.Refs)
+	}
+	for i, w := range want {
+		if got.Resources.Refs[i] != w {
+			t.Errorf("ref %d = %+v, want %+v", i, got.Resources.Refs[i], w)
+		}
+	}
+
+	// The decoy shares a name prefix but not a path prefix, so it must be its
+	// own skill rather than a file of the first.
+	if entries[1].URI != "skill://analytics-guide-v2/SKILL.md" {
+		t.Errorf("second entry = %q, want the decoy as its own skill", entries[1].URI)
+	}
+	if n := len(entries[1].Resources.Refs); n != 1 {
+		t.Errorf("decoy has %d refs, want 1 — analytics-guide's files must not leak in", n)
+	}
+}
+
+// TestDiscoverNestedSkill pins the SEP rule that a nested skill is published as
+// its own entry while its files stay listed in the enclosing skill's manifest.
+func TestDiscoverNestedSkill(t *testing.T) {
+	ctx, err := testutils.ContextWithNewLogger()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resourcesMap := map[string]resources.Resource{
+		"parent": textResource(t, ctx, "parent", "skill://acme/billing/SKILL.md",
+			skillMD("billing", "Billing workflows")),
+		"child": textResource(t, ctx, "child", "skill://acme/billing/refunds/SKILL.md",
+			skillMD("refunds", "Refund workflows")),
+	}
+
+	entries, err := skills.Discover(ctx, resourcesMap)
+	if err != nil {
+		t.Fatalf("Discover() = %v, want nil", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("got %d entries, want 2", len(entries))
+	}
+
+	byURI := map[string]skills.Entry{}
+	for _, e := range entries {
+		byURI[e.URI] = e
+	}
+
+	parent, ok := byURI["skill://acme/billing/SKILL.md"]
+	if !ok {
+		t.Fatal("enclosing skill missing from the entries")
+	}
+	if n := len(parent.Resources.Refs); n != 2 {
+		t.Errorf("enclosing manifest has %d refs, want 2 — a nested skill's files stay listed in it", n)
+	}
+
+	child, ok := byURI["skill://acme/billing/refunds/SKILL.md"]
+	if !ok {
+		t.Fatal("nested skill missing from the entries")
+	}
+	if n := len(child.Resources.Refs); n != 1 {
+		t.Errorf("nested manifest has %d refs, want 1", n)
+	}
+}
+
+func TestDiscoverErrors(t *testing.T) {
+	ctx, err := testutils.ContextWithNewLogger()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tcs := []struct {
+		desc    string
+		uri     string
+		content string
+		wantErr string
+	}{
+		{
+			desc:    "SKILL.md without frontmatter",
+			uri:     "skill://guide/SKILL.md",
+			content: "# Just a heading\n",
+			wantErr: "must open with YAML frontmatter",
+		},
+		{
+			desc:    "frontmatter never closed",
+			uri:     "skill://guide/SKILL.md",
+			content: "---\nname: guide\n",
+			wantErr: "not closed by ---",
+		},
+		{
+			desc:    "frontmatter missing description",
+			uri:     "skill://guide/SKILL.md",
+			content: "---\nname: guide\n---\n",
+			wantErr: "description",
+		},
+		{
+			desc:    "frontmatter name disagrees with the URI",
+			uri:     "skill://guide/SKILL.md",
+			content: skillMD("something-else", "Mismatched"),
+			wantErr: "name",
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			resourcesMap := map[string]resources.Resource{
+				"s": textResource(t, ctx, "s", tc.uri, tc.content),
+			}
+			_, err := skills.Discover(ctx, resourcesMap)
+			if err == nil {
+				t.Fatalf("Discover() = nil, want error containing %q", tc.wantErr)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("Discover() = %v, want error containing %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestDiscoverNoSkills(t *testing.T) {
+	ctx, err := testutils.ContextWithNewLogger()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resourcesMap := map[string]resources.Resource{
+		"docs": textResource(t, ctx, "docs", "file://project-docs", "hello"),
+		// A skill:// resource that is not a SKILL.md does not make a skill on
+		// its own; without a SKILL.md there is nothing to key an entry on.
+		"orphan": textResource(t, ctx, "orphan", "skill://guide/references/orphan.md", "hello"),
+	}
+
+	entries, err := skills.Discover(ctx, resourcesMap)
+	if err != nil {
+		t.Fatalf("Discover() = %v, want nil", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("got %d entries, want none", len(entries))
+	}
+}
